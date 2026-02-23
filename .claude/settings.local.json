@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(dir:*)",
+      "Skill(frontend-design)",
+      "Skill(ui-ux-pro-max)",
+      "Bash(tasklist:*)",
+      "Bash(findstr:*)",
+      "Bash(npm run dev:*)",
+      "mcp__desktop-commander__list_directory",
+      "Bash(python3:*)",
+      "Bash(npm create vite@latest . -- --template vue-ts:*)",
+      "mcp__desktop-commander__create_directory",
+      "mcp__desktop-commander__write_file",
+      "mcp__desktop-commander__start_process",
+      "Bash(del:*)",
+      "mcp__desktop-commander__read_process_output",
+      "mcp__desktop-commander__force_terminate",
+      "Bash(curl:*)",
+      "mcp__desktop-commander__read_file",
+      "mcp__desktop-commander__edit_block",
+      "Bash(timeout 5 curl:*)",
+      "Bash(netstat:*)",
+      "Bash(timeout 5 bash -c \"while ! curl -s http://127.0.0.1:8004/health > /dev/null 2>&1; do sleep 0.5; done; echo ''Server is ready''\")",
+      "Bash(powershell -Command:*)",
+      "Bash(timeout:*)"
+    ]
+  }
+}
