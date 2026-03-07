@@ -43,7 +43,7 @@ class Alert(Base, BaseModel, TimestampMixin):
         return f"<Alert(id={self.id}, student_id={self.student_id}, level={self.level}, status={self.status})>"
 
 
-class AlertRecord(Base, BaseModel):
+class AlertRecord(Base, BaseModel, TimestampMixin):
     """预警处理记录表"""
     __tablename__ = "alert_records"
 

@@ -311,7 +311,7 @@ def handle_alert(
 @router.put("/{alert_id}/status", summary="更新预警状态")
 def update_alert_status(
     alert_id: int,
-    new_status: AlertStatus,
+    status: AlertStatus,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_counselor_or_admin)
 ):
@@ -337,7 +337,7 @@ def update_alert_status(
                 detail="您没有权限更新该预警状态"
             )
 
-    alert.status = new_status
+    alert.status = status
     db.commit()
 
     return {"message": "状态更新成功"}
