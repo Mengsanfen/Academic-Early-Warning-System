@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.rule_engine.parser import RuleParser, ParsedRule
 from app.core.rule_engine.executor import RuleExecutor, ExecutionResult
-from app.models.rule import Rule, RuleType, AlertLevel
+from app.models.rule import Rule, RuleType, AlertLevel, COMPREHENSIVE_RULE_CODE
 from app.models.alert import Alert, AlertStatus
 from app.models.student import Student
 
@@ -217,10 +217,12 @@ class RuleEngine:
         templates = {
             RuleType.SCORE: f"学生{student.name}({student.student_no})成绩预警：{rule.description or rule.name}",
             RuleType.ATTENDANCE: f"学生{student.name}({student.student_no})考勤预警：{rule.description or rule.name}",
-            RuleType.COMPREHENSIVE: f"学生{student.name}({student.student_no})综合预警：{rule.description or rule.name}",
         }
 
-        base_message = templates.get(rule.type, f"学生{student.name}预警：{rule.name}")
+        if rule.code == COMPREHENSIVE_RULE_CODE:
+            base_message = f"学生{student.name}({student.student_no})综合预警：{rule.description or rule.name}"
+        else:
+            base_message = templates.get(rule.type, f"学生{student.name}预警：{rule.name}")
 
         # 添加详细信息
         if result.details:

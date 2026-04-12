@@ -1,7 +1,7 @@
 """
 预警模型
 """
-from sqlalchemy import Column, Integer, String, Text, Enum as SQLEnum, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, Enum as SQLEnum, ForeignKey
 from sqlalchemy.orm import relationship
 import enum
 
@@ -33,6 +33,8 @@ class Alert(Base, BaseModel, TimestampMixin):
         comment="状态"
     )
     semester = Column(String(20), nullable=True, comment="学期")
+    student_feedback = Column(Text, nullable=True, comment="学生反馈/申诉内容")
+    feedback_time = Column(DateTime, nullable=True, comment="学生反馈时间")
 
     # 关联关系
     student = relationship("Student", back_populates="alerts")

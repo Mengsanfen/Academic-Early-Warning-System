@@ -13,6 +13,9 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
+from app.core.rule_engine.comprehensive_rule import ensure_comprehensive_rule, evaluate_comprehensive_rule
+from app.models.rule import COMPREHENSIVE_RULE_CODE, COMPREHENSIVE_RULE_MODE
+
 logger = logging.getLogger(__name__)
 
 
@@ -87,6 +90,7 @@ class SimpleRuleEngine:
 
         try:
             # 1. 加载所有启用的规则
+            ensure_comprehensive_rule(self.db)
             rules = self.db.query(Rule).filter(Rule.is_active == True).all()
             if not rules:
                 logger.warning("没有找到启用的规则")
@@ -150,6 +154,24 @@ class SimpleRuleEngine:
             conditions = self._parse_conditions(rule.conditions)
             if conditions is None:
                 result["error"] = "规则条件解析失败"
+                return result
+
+            if (
+                rule.code == COMPREHENSIVE_RULE_CODE
+                or conditions.get("mode") == COMPREHENSIVE_RULE_MODE
+            ):
+                for student in students:
+                    try:
+                        evaluation = evaluate_comprehensive_rule(student.id, self.db, rule)
+                        if evaluation.get("triggered"):
+                            stats["total_triggered"] += 1
+                            result["triggered_count"] += 1
+                        if evaluation.get("alert_created"):
+                            stats["alerts_created"] += 1
+                            result["alerts_created"] += 1
+                    except Exception as e:
+                        logger.warning(f"澶勭悊瀛︾敓 {student.id} 缁煎悎瑙勫垯 {rule.id} 鏃跺嚭閿? {e}")
+                        continue
                 return result
 
             metric_type = conditions.get("metric")

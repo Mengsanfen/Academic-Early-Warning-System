@@ -6,6 +6,7 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.pool import QueuePool
 
 from app.config import settings
+from app.schema_sync import ensure_runtime_schema
 
 # MySQL 配置
 engine = create_engine(
@@ -45,3 +46,4 @@ def init_db():
         user, student, course, score, attendance, rule, alert
     )
     Base.metadata.create_all(bind=engine)
+    ensure_runtime_schema(engine)

@@ -8,6 +8,9 @@ import enum
 from app.database import Base
 from app.models.base import BaseModel, TimestampMixin
 
+COMPREHENSIVE_RULE_CODE = "COMPREHENSIVE_RISK"
+COMPREHENSIVE_RULE_MODE = "comprehensive"
+
 
 class RuleType(str, enum.Enum):
     """规则类型枚举"""

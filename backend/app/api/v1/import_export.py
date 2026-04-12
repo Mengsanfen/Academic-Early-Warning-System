@@ -10,7 +10,7 @@ import openpyxl
 from openpyxl.workbook import Workbook
 
 from app.database import get_db
-from app.api.deps import get_admin_user, get_counselor_or_admin
+from app.api.deps import check_class_access, get_admin_user, get_counselor_or_admin
 from app.models.user import User, UserRole
 from app.models.student import Student, Class, StudentStatus, Department
 from app.models.score import Score
@@ -20,6 +20,29 @@ from app.core.security import get_password_hash
 
 
 router = APIRouter()
+
+
+def _ensure_import_scope(current_user: User, student: Student, course: Course) -> None:
+    """Ensure counselors can only import data for managed classes."""
+    student_class_id = student.class_id
+
+    if student_class_id and course.class_id is None:
+        course.class_id = student_class_id
+
+    if current_user.role != UserRole.COUNSELOR:
+        return
+
+    if not student_class_id or not check_class_access(current_user, student_class_id):
+        raise PermissionError("无权导入该学生所在班级的数据")
+
+    if not course.class_id:
+        raise PermissionError("课程未绑定班级，无法确认导入权限")
+
+    if course.class_id != student_class_id:
+        raise PermissionError("课程所属班级与学生所在班级不一致，无法导入")
+
+    if not check_class_access(current_user, course.class_id):
+        raise PermissionError("无权导入该课程所属班级的数据")
 
 
 def get_or_create_department(db: Session, name: str = "默认院系") -> Department:
@@ -322,7 +345,7 @@ async def import_scores(
     file: UploadFile = File(...),
     update_existing: bool = False,  # 是否更新已存在的成绩
     db: Session = Depends(get_db),
-    _: User = Depends(get_counselor_or_admin)
+    current_user: User = Depends(get_counselor_or_admin)
 ):
     """
     批量导入成绩数据
@@ -416,10 +439,14 @@ async def import_scores(
                     course_code=course_code,
                     course_name=course_name or course_code,
                     credit=credit,
-                    semester=semester
+                    semester=semester,
+                    class_id=student.class_id,
                 )
+                _ensure_import_scope(current_user, student, course)
                 db.add(course)
                 db.flush()
+            else:
+                _ensure_import_scope(current_user, student, course)
 
             # 检查是否已存在成绩
             existing_score = db.query(Score).filter(
@@ -444,8 +471,7 @@ async def import_scores(
                 course_id=course.id,
                 score=score_float,
                 semester=semester,
-                exam_type=exam_type,
-                is_passed=score_float >= 60
+                exam_type=exam_type
             )
             db.add(new_score)
             result.success += 1
@@ -510,7 +536,7 @@ def download_score_template():
 async def import_attendances(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    _: User = Depends(get_counselor_or_admin)
+    current_user: User = Depends(get_counselor_or_admin)
 ):
     """
     批量导入考勤数据
@@ -561,9 +587,9 @@ async def import_attendances(
 
     # 状态映射
     status_map = {
-        "正常": AttendanceStatus.NORMAL,
-        "出勤": AttendanceStatus.NORMAL,
-        "present": AttendanceStatus.NORMAL,
+        "正常": AttendanceStatus.PRESENT,
+        "出勤": AttendanceStatus.PRESENT,
+        "present": AttendanceStatus.PRESENT,
         "缺勤": AttendanceStatus.ABSENT,
         "旷课": AttendanceStatus.ABSENT,
         "absent": AttendanceStatus.ABSENT,
@@ -623,10 +649,14 @@ async def import_attendances(
                     course_code=course_code,
                     course_name=course_name or course_code,
                     credit=1.0,
-                    semester="unknown"
+                    semester="unknown",
+                    class_id=student.class_id,
                 )
+                _ensure_import_scope(current_user, student, course)
                 db.add(course)
                 db.flush()
+            else:
+                _ensure_import_scope(current_user, student, course)
 
             # 检查是否已存在考勤记录
             existing = db.query(Attendance).filter(

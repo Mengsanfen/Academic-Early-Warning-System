@@ -88,7 +88,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'alerts',
         name: 'Alerts',
-        component: () => import('@/views/alerts/index.vue'),
+        component: () => import('@/views/alerts/AlertCenterEnhanced.vue'),
         meta: {
           title: '预警中心',
           icon: 'Bell',
@@ -99,7 +99,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'users',
         name: 'Users',
-        component: () => import('@/views/users/index.vue'),
+        component: () => import('@/views/users/UsersEnhanced.vue'),
         meta: {
           title: '用户管理',
           icon: 'Avatar',
@@ -182,7 +182,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'my-alerts',
         name: 'StudentAlerts',
-        component: () => import('@/views/student/Alerts.vue'),
+        component: () => import('@/views/student/StudentAlertsEnhanced.vue'),
         meta: {
           title: '我的预警',
           icon: 'Warning',

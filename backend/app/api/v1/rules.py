@@ -1,3 +1,5 @@
+from app.api.v1.rules_secure import *  # noqa: F401,F403
+'''
 """
 规则管理 API
 """
@@ -10,7 +12,13 @@ import logging
 from app.database import get_db
 from app.api.deps import get_admin_user
 from app.models.user import User
-from app.models.rule import Rule, RuleType, AlertLevel
+from app.models.rule import (
+    Rule,
+    RuleType,
+    AlertLevel,
+    COMPREHENSIVE_RULE_CODE,
+    COMPREHENSIVE_RULE_MODE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +141,20 @@ DEFAULT_RULES = [
         "level": AlertLevel.SERIOUS,
         "description": "出勤率低于80%",
         "message_template": "学生{student_name}({student_no})出勤率过低，当前出勤率{metric_value}"
+    }
+    ,
+    {
+        "name": "瀛︿笟缁煎悎椋庨櫓棰勮",
+        "code": COMPREHENSIVE_RULE_CODE,
+        "type": RuleType.GRADUATION,
+        "conditions": {
+            "mode": COMPREHENSIVE_RULE_MODE,
+            "fail_count_threshold": 2,
+            "absence_count_threshold": 3
+        },
+        "level": AlertLevel.URGENT,
+        "description": "鍗曞鏈熶笉鍙婃牸璇剧▼鏁拌揪鍒?2 闂ㄤ笖绱缂哄嫟娆℃暟杈惧埌 3 娆?,
+        "message_template": "缁煎悎椋庨櫓锛氳鐢熷凡鎸傜 {fail_count} 闂紝涓旂己鍕?{absence_count} 娆★紝璇风珛鍗冲共棰勶紒"
     }
 ]
 
@@ -450,3 +472,4 @@ def _validate_conditions(conditions: Dict[str, Any]) -> bool:
             raise ValueError(f"不支持的运算符: {conditions['operator']}，支持: {valid_operators}")
 
     return True
+'''

@@ -14,7 +14,7 @@ from app.database import get_db
 from app.api.deps import (
     get_current_user,
     get_counselor_or_admin,
-    apply_class_filter,
+    check_class_access,
     check_student_access,
     get_accessible_class_ids
 )
@@ -64,7 +64,7 @@ class StudentResponse(BaseModel):
     gender: str
     class_id: int
     class_name: Optional[str] = None
-    grade: int
+    grade: Optional[int] = None
     phone: Optional[str]
     email: Optional[str]
     is_active: bool
@@ -72,6 +72,31 @@ class StudentResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+def _parse_grade_value(student: Student) -> Optional[int]:
+    if not student.class_info or student.class_info.grade in (None, ""):
+        return None
+    try:
+        return int(student.class_info.grade)
+    except (TypeError, ValueError):
+        return None
+
+
+def _serialize_student_response(student: Student) -> dict:
+    return {
+        "id": student.id,
+        "student_no": student.student_no,
+        "name": student.name,
+        "gender": student.gender,
+        "class_id": student.class_id,
+        "class_name": student.class_info.name if student.class_info else None,
+        "grade": _parse_grade_value(student),
+        "phone": student.phone,
+        "email": student.email,
+        "is_active": student.is_active,
+        "created_at": student.created_at,
+    }
 
 
 # ========== API 端点 ==========
@@ -389,20 +414,23 @@ def get_my_alerts(
     student_id = current_user.student.id
 
     from app.models.alert import Alert, AlertStatus
-    from app.models.rule import AlertLevel, RuleType
+    from app.models.rule import AlertLevel, COMPREHENSIVE_RULE_CODE, Rule, RuleType
 
-    query = db.query(Alert).filter(Alert.student_id == student_id)
+    query = db.query(Alert).join(Rule, Alert.rule_id == Rule.id).filter(Alert.student_id == student_id)
 
     # 类型过滤（前端传 grade/attendance/credit/comprehensive，后端是 score/attendance/graduation）
     if type:
-        type_mapping = {
-            "grade": RuleType.SCORE,
-            "attendance": RuleType.ATTENDANCE,
-            "credit": RuleType.GRADUATION,
-            "comprehensive": None
-        }
-        if type in type_mapping and type_mapping[type]:
-            query = query.join(Alert.rule).filter(Alert.rule.property('type') == type_mapping[type])
+        if type == "comprehensive":
+            query = query.filter(Rule.code == COMPREHENSIVE_RULE_CODE)
+        else:
+            type_mapping = {
+                "grade": RuleType.SCORE,
+                "attendance": RuleType.ATTENDANCE,
+                "credit": RuleType.GRADUATION,
+            }
+            rule_type = type_mapping.get(type)
+            if rule_type:
+                query = query.filter(Rule.type == rule_type, Rule.code != COMPREHENSIVE_RULE_CODE)
 
     # 级别过滤（前端传 high/medium/low，后端是 urgent/serious/warning）
     if level:
@@ -444,7 +472,9 @@ def get_my_alerts(
     for a in alerts:
         # 从rule获取alert_type，映射到前端格式
         alert_type = "comprehensive"
-        if a.rule and a.rule.type:
+        if a.rule and a.rule.code == COMPREHENSIVE_RULE_CODE:
+            alert_type = "comprehensive"
+        elif a.rule and a.rule.type:
             type_mapping_reverse = {
                 RuleType.SCORE: "grade",
                 RuleType.ATTENDANCE: "attendance",
@@ -467,6 +497,8 @@ def get_my_alerts(
             "description": a.message,
             "suggestion": None,  # 暂无建议字段
             "status": a.status.value if a.status else None,
+            "student_feedback": a.student_feedback,
+            "feedback_time": a.feedback_time.isoformat() if a.feedback_time else None,
             "created_at": a.created_at.isoformat() if a.created_at else None,
             "updated_at": a.updated_at.isoformat() if a.updated_at else None
         })
@@ -589,7 +621,19 @@ def get_students(
 
     # ========== 核心权限过滤 ==========
     # 根据用户角色应用班级过滤
-    query = apply_class_filter(query, current_user, Student.class_id)
+    if current_user.role == UserRole.ADMIN:
+        pass
+    elif current_user.role == UserRole.COUNSELOR:
+        managed_class_ids = current_user.get_managed_class_ids()
+        if not managed_class_ids:
+            return {"items": [], "total": 0, "page": page, "page_size": page_size}
+        query = query.filter(Student.class_id.in_(managed_class_ids))
+    elif current_user.role == UserRole.STUDENT:
+        if not current_user.student:
+            return {"items": [], "total": 0, "page": page, "page_size": page_size}
+        query = query.filter(Student.id == current_user.student.id)
+    else:
+        return {"items": [], "total": 0, "page": page, "page_size": page_size}
 
     # 如果是学生角色，只能查看自己
     if current_user.role == UserRole.STUDENT:
@@ -707,7 +751,7 @@ def get_student(
 def create_student(
     data: StudentCreate,
     db: Session = Depends(get_db),
-    _: User = Depends(get_counselor_or_admin)
+    current_user: User = Depends(get_counselor_or_admin)
 ):
     """
     创建学生（管理员和辅导员可操作）
@@ -727,12 +771,19 @@ def create_student(
             detail="班级不存在"
         )
 
-    student = Student(**data.model_dump())
+    if current_user.role == UserRole.COUNSELOR and not check_class_access(current_user, data.class_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="您没有权限在该班级下创建学生"
+        )
+
+    student_payload = data.model_dump(exclude={"grade"})
+    student = Student(**student_payload)
     db.add(student)
     db.commit()
     db.refresh(student)
 
-    return StudentResponse.model_validate(student)
+    return _serialize_student_response(student)
 
 
 @router.put("/{student_id:int}", response_model=StudentResponse, summary="更新学生")
@@ -773,13 +824,13 @@ def update_student(
                 )
 
     # 更新字段
-    for key, value in data.model_dump(exclude_unset=True).items():
+    for key, value in data.model_dump(exclude_unset=True, exclude={"grade"}).items():
         setattr(student, key, value)
 
     db.commit()
     db.refresh(student)
 
-    return StudentResponse.model_validate(student)
+    return _serialize_student_response(student)
 
 
 @router.delete("/{student_id:int}", summary="删除学生")
@@ -923,6 +974,3 @@ def get_student_attendances(
             for a in attendances
         ]
     }
-
-
-
