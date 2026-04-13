@@ -466,17 +466,18 @@ def execute_rules(
         engine = SimpleRuleEngine(db)
         result = engine.execute_all_rules()
         message_parts = [
-            f"检查了 {result['total_students']} 名学生",
-            f"执行了 {result['total_rules']} 条规则",
-            f"触发了 {result['total_triggered']} 次预警",
-            f"创建了 {result['alerts_created']} 条新预警",
+            f"\u68c0\u67e5\u4e86 {result['total_students']} \u540d\u5b66\u751f",
+            f"\u6267\u884c\u4e86 {result['total_rules']} \u6761\u89c4\u5219",
+            f"\u89e6\u53d1\u4e86 {result['total_triggered']} \u6b21\u9884\u8b66",
+            f"\u65b0\u589e\u4e86 {result['alerts_created']} \u6761\u9884\u8b66",
+            f"\u81ea\u52a8\u89e3\u9664 {result.get('alerts_resolved', 0)} \u6761\u9884\u8b66",
         ]
         if result["errors"]:
-            message_parts.append(f"遇到 {len(result['errors'])} 个错误")
+            message_parts.append(f"\u51fa\u73b0 {len(result['errors'])} \u4e2a\u9519\u8bef")
 
         return {
             "success": True,
-            "message": "；".join(message_parts),
+            "message": "\uff0c".join(message_parts),
             "stats": result,
         }
     except Exception as exc:
