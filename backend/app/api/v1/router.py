@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 
-from app.api.v1 import auth, users_secure as users, students, rules_secure as rules, alerts_secure as alerts, dashboard_secure as dashboard, password, import_export, scores_secure as scores, attendances_secure as attendances, students_classes
+from app.api.v1 import auth, users_secure as users, students, rules_secure as rules, alerts_secure as alerts, dashboard_secure as dashboard, password, import_export, scores_secure as scores, attendances_secure as attendances, students_classes, courses
 from app.api.v1 import classes as classes_module
 from app.database import get_db
 from app.api.deps import get_current_user, get_accessible_class_ids
@@ -29,3 +29,4 @@ api_router.include_router(password.router, prefix="/password", tags=["密码找�
 api_router.include_router(import_export.router, prefix="/import", tags=["数据导入导出"])
 api_router.include_router(scores.router, prefix="/scores", tags=["成绩管理"])
 api_router.include_router(attendances.router, prefix="/attendances", tags=["考勤管理"])
+api_router.include_router(courses.router, prefix="/courses", tags=["课程管理"])

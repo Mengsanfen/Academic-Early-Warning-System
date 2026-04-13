@@ -5,7 +5,7 @@ import type { UserRole } from '@/types'
 // 路由元信息类型
 declare module 'vue-router' {
   interface RouteMeta {
-    title: string
+    title?: string
     icon?: string
     hidden?: boolean
     requiresAuth?: boolean
@@ -39,7 +39,7 @@ const routes: RouteRecordRaw[] = [
     path: '/',
     component: () => import('@/components/Layout/index.vue'),
     redirect: '/dashboard',
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, title: '管理后台' },
     children: [
       // 仪表盘 - 管理员/辅导员
       {
@@ -81,6 +81,17 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '规则配置',
           icon: 'Setting',
+          roles: ['admin']
+        }
+      },
+      // 课程管理 - 仅管理员
+      {
+        path: 'courses',
+        name: 'Courses',
+        component: () => import('@/views/courses/index.vue'),
+        meta: {
+          title: '课程管理',
+          icon: 'Reading',
           roles: ['admin']
         }
       },
@@ -143,7 +154,7 @@ const routes: RouteRecordRaw[] = [
     path: '/student',
     component: () => import('@/components/Layout/index.vue'),
     redirect: '/student/overview',
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, title: '学生端' },
     children: [
       // 个人概览 - 学生
       {

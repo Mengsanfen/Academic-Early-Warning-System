@@ -1,7 +1,59 @@
-import { request } from '@/utils/request'
-import type { PageResponse, Rule, RuleType, AlertLevel } from '@/types'
+﻿import { request } from '@/utils/request'
+import type { AlertLevel, PageResponse, Rule, RuleType } from '@/types'
 
-// 获取规则列表
+export interface RuleMetricOption {
+  value: string
+  label: string
+  description: string
+  supports_time_window?: boolean
+  supports_course_type?: boolean
+  unit?: string
+}
+
+export interface RuleOperatorOption {
+  value: string
+  label: string
+}
+
+export interface RuleTimeWindowOption {
+  value: string | null
+  label: string
+}
+
+export interface RuleTargetTypeOption {
+  value: string
+  label: string
+  description: string
+}
+
+export interface RuleCourseTypeOption {
+  value: string
+  label: string
+  description: string
+}
+
+export interface RuleQuickTemplate {
+  name: string
+  code: string
+  type: RuleType
+  level: AlertLevel
+  description?: string
+  message_template?: string
+  target_type?: string
+  conditions: Record<string, any>
+}
+
+export interface RuleTemplateResponse {
+  metrics: RuleMetricOption[]
+  operators: RuleOperatorOption[]
+  time_windows: RuleTimeWindowOption[]
+  examples: any[]
+  special_modes: Array<{ value: string; label: string; description: string }>
+  target_types: RuleTargetTypeOption[]
+  course_types: RuleCourseTypeOption[]
+  quick_templates: RuleQuickTemplate[]
+}
+
 export function getRules(params: {
   page?: number
   page_size?: number
@@ -11,32 +63,46 @@ export function getRules(params: {
   return request.get<PageResponse<Rule>>('/rules', { params })
 }
 
-// 获取规则详情
 export function getRule(id: number) {
   return request.get<Rule>(`/rules/${id}`)
 }
 
-// 创建规则
 export function createRule(data: Partial<Rule>) {
   return request.post<Rule>('/rules', data)
 }
 
-// 更新规则
 export function updateRule(id: number, data: Partial<Rule>) {
   return request.put<Rule>(`/rules/${id}`, data)
 }
 
-// 删除规则
 export function deleteRule(id: number) {
   return request.delete(`/rules/${id}`)
 }
 
-// 切换规则状态
 export function toggleRule(id: number) {
   return request.post<Rule>(`/rules/${id}/toggle`)
 }
 
-// 执行规则
 export function executeRules() {
   return request.post<{ message: string }>('/rules/execute')
+}
+
+export function getRuleTemplates() {
+  return request.get<RuleTemplateResponse>('/rules/templates')
+}
+
+export function getGrades() {
+  return request.get<{ items: Array<{ value: string; label: string }>; total: number }>('/rules/grades')
+}
+
+export function getTargetOptions() {
+  return request.get<{
+    grades: string[]
+    classes: Array<{
+      id: number
+      name: string
+      grade: string
+      department_name?: string
+    }>
+  }>('/rules/target-options')
 }

@@ -358,10 +358,13 @@ async def import_scores(
     - 学分
     - 学期 (必填)
     - 考试类型 (期末/补考/重修)
+    - 课程类型 (必修/选修/公共/专业/实践)
 
     参数:
     - update_existing: 是否更新已存在的成绩记录
     """
+    from app.models.course import CourseType
+
     if not file.filename.endswith(('.xlsx', '.xls')):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -399,6 +402,25 @@ async def import_scores(
 
     col_map = {h: i for i, h in enumerate(headers)}
 
+    # 课程类型映射
+    course_type_map = {
+        "必修": CourseType.REQUIRED,
+        "必修课": CourseType.REQUIRED,
+        "required": CourseType.REQUIRED,
+        "选修": CourseType.ELECTIVE,
+        "选修课": CourseType.ELECTIVE,
+        "elective": CourseType.ELECTIVE,
+        "公共": CourseType.PUBLIC,
+        "公共课": CourseType.PUBLIC,
+        "public": CourseType.PUBLIC,
+        "专业": CourseType.PROFESSIONAL,
+        "专业课": CourseType.PROFESSIONAL,
+        "professional": CourseType.PROFESSIONAL,
+        "实践": CourseType.PRACTICE,
+        "实践课": CourseType.PRACTICE,
+        "practice": CourseType.PRACTICE,
+    }
+
     for row_idx, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
         result.total += 1
 
@@ -410,6 +432,7 @@ async def import_scores(
             credit = float(row[col_map.get("学分", -1)]) if "学分" in col_map and row[col_map.get("学分", -1)] else 1.0
             semester = str(row[col_map["学期"]] or "").strip()
             exam_type = str(row[col_map.get("考试类型", -1)] or "期末").strip() if "考试类型" in col_map else "期末"
+            course_type_str = str(row[col_map.get("课程类型", -1)] or "").strip() if "课程类型" in col_map else ""
 
             # 验证必填字段
             if not student_no or not course_code or score_value is None or not semester:
@@ -424,6 +447,9 @@ async def import_scores(
                 result.failed += 1
                 result.errors.append(f"第{row_idx}行: 成绩格式错误")
                 continue
+
+            # 解析课程类型
+            course_type = course_type_map.get(course_type_str, CourseType.REQUIRED) if course_type_str else CourseType.REQUIRED
 
             # 查找学生
             student = db.query(Student).filter(Student.student_no == student_no).first()
@@ -441,11 +467,15 @@ async def import_scores(
                     credit=credit,
                     semester=semester,
                     class_id=student.class_id,
+                    course_type=course_type,
                 )
                 _ensure_import_scope(current_user, student, course)
                 db.add(course)
                 db.flush()
             else:
+                # 更新课程类型（如果提供了新的类型）
+                if course_type_str and course.course_type != course_type:
+                    course.course_type = course_type
                 _ensure_import_scope(current_user, student, course)
 
             # 检查是否已存在成绩
@@ -499,22 +529,23 @@ def download_score_template():
     ws = wb.active
     ws.title = "成绩导入模板"
 
-    headers = ["学号", "课程代码", "课程名称", "成绩", "学分", "学期", "考试类型"]
+    headers = ["学号", "课程代码", "课程名称", "成绩", "学分", "学期", "考试类型", "课程类型"]
     for col, header in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col, value=header)
         cell.font = openpyxl.styles.Font(bold=True)
         cell.fill = openpyxl.styles.PatternFill(start_color="E0E0E0", end_color="E0E0E0", fill_type="solid")
 
     sample_data = [
-        ["2024001", "CS101", "计算机导论", 85, 3, "2024-2025-1", "期末"],
-        ["2024001", "MA101", "高等数学", 72, 4, "2024-2025-1", "期末"],
-        ["2024002", "CS101", "计算机导论", 58, 3, "2024-2025-1", "补考"],
+        ["2024001", "CS101", "计算机导论", 85, 3, "2024-2025-1", "期末", "必修"],
+        ["2024001", "MA101", "高等数学", 72, 4, "2024-2025-1", "期末", "必修"],
+        ["2024002", "CS101", "计算机导论", 58, 3, "2024-2025-1", "补考", "必修"],
+        ["2024003", "ART101", "艺术鉴赏", 90, 2, "2024-2025-1", "期末", "选修"],
     ]
     for row_idx, row_data in enumerate(sample_data, 2):
         for col_idx, value in enumerate(row_data, 1):
             ws.cell(row=row_idx, column=col_idx, value=value)
 
-    column_widths = [15, 12, 20, 8, 6, 12, 10]
+    column_widths = [15, 12, 20, 8, 6, 12, 10, 10]
     for i, width in enumerate(column_widths, 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = width
 

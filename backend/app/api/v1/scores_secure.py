@@ -90,6 +90,7 @@ def _serialize_score(score: Score) -> dict:
         "course_code": score.course.course_code if score.course else "",
         "course_name": score.course.course_name if score.course else "",
         "credit": float(score.course.credit) if score.course and score.course.credit is not None else 0,
+        "course_type": score.course.course_type.value if score.course and score.course.course_type else "required",
         "score": float(score.score),
         "semester": score.semester,
         "exam_type": score.exam_type,
@@ -146,14 +147,24 @@ def get_scores(
 @router.get("/courses", response_model=dict, summary="获取课程列表")
 def get_courses_for_select(
     semester: Optional[str] = None,
+    course_type: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_counselor_or_admin),
 ):
+    from app.models.course import CourseType
+
     query = db.query(Course)
     query = apply_class_filter(query, current_user, Course.class_id)
 
     if semester:
         query = query.filter(Course.semester == semester)
+
+    if course_type:
+        try:
+            course_type_enum = CourseType(course_type)
+            query = query.filter(Course.course_type == course_type_enum)
+        except ValueError:
+            pass
 
     courses = query.order_by(Course.course_code).all()
     return {
@@ -164,8 +175,26 @@ def get_courses_for_select(
                 "course_name": course.course_name,
                 "credit": float(course.credit),
                 "semester": course.semester,
+                "course_type": course.course_type.value if course.course_type else "required",
+                "teacher_name": course.teacher_name,
             }
             for course in courses
+        ]
+    }
+
+
+@router.get("/course-types", response_model=dict, summary="获取课程类型列表")
+def get_course_types():
+    """获取所有课程类型选项"""
+    from app.models.course import CourseType
+
+    return {
+        "items": [
+            {"value": CourseType.REQUIRED.value, "label": "必修课", "description": "必须修读的课程"},
+            {"value": CourseType.ELECTIVE.value, "label": "选修课", "description": "选择性修读的课程"},
+            {"value": CourseType.PUBLIC.value, "label": "公共课", "description": "公共基础课程"},
+            {"value": CourseType.PROFESSIONAL.value, "label": "专业课", "description": "专业核心课程"},
+            {"value": CourseType.PRACTICE.value, "label": "实践课", "description": "实践类课程"},
         ]
     }
 

@@ -4,7 +4,7 @@ Runtime schema sync helpers for existing databases.
 from __future__ import annotations
 
 import logging
-from typing import Iterable
+from collections.abc import Iterable
 
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
@@ -37,8 +37,11 @@ def ensure_runtime_schema(engine: Engine) -> None:
     """
     user_columns = _existing_columns(engine, "users")
     alert_columns = _existing_columns(engine, "alerts")
+    rule_columns = _existing_columns(engine, "rules")
+    course_columns = _existing_columns(engine, "courses")
 
     statements: list[str] = []
+    json_type = "JSON" if engine.dialect.name.startswith("mysql") else "TEXT"
 
     if user_columns and "managed_class_ids" not in user_columns:
         statements.append("ALTER TABLE users ADD COLUMN managed_class_ids TEXT NULL")
@@ -49,4 +52,30 @@ def ensure_runtime_schema(engine: Engine) -> None:
         if "feedback_time" not in alert_columns:
             statements.append("ALTER TABLE alerts ADD COLUMN feedback_time DATETIME NULL")
 
+    if rule_columns:
+        if "target_type" not in rule_columns:
+            statements.append("ALTER TABLE rules ADD COLUMN target_type VARCHAR(20) NOT NULL DEFAULT 'all'")
+        if "target_grades" not in rule_columns:
+            statements.append(f"ALTER TABLE rules ADD COLUMN target_grades {json_type} NULL")
+        if "target_classes" not in rule_columns:
+            statements.append(f"ALTER TABLE rules ADD COLUMN target_classes {json_type} NULL")
+
+    if course_columns:
+        if "teacher_name" not in course_columns:
+            statements.append("ALTER TABLE courses ADD COLUMN teacher_name VARCHAR(50) NULL")
+        if "course_type" not in course_columns:
+            statements.append("ALTER TABLE courses ADD COLUMN course_type VARCHAR(20) NOT NULL DEFAULT 'required'")
+
     _run_alter_statements(engine, statements)
+
+    data_fix_statements: list[str] = []
+    if rule_columns:
+        data_fix_statements.append(
+            "UPDATE rules SET target_type = 'all' WHERE target_type IS NULL OR target_type = ''"
+        )
+    if course_columns:
+        data_fix_statements.append(
+            "UPDATE courses SET course_type = 'required' WHERE course_type IS NULL OR course_type = ''"
+        )
+
+    _run_alter_statements(engine, data_fix_statements)

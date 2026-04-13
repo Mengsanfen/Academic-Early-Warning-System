@@ -56,20 +56,20 @@ service.interceptors.response.use(
 
 // 封装请求方法
 export const request = {
-  get<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
-    return service.get(url, config)
+  get<T = any>(url: string, config?: AxiosRequestConfig): Promise<T> {
+    return service.get<any, T>(url, config)
   },
   
-  post<T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
-    return service.post(url, data, config)
+  post<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
+    return service.post<any, T>(url, data, config)
   },
   
-  put<T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
-    return service.put(url, data, config)
+  put<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
+    return service.put<any, T>(url, data, config)
   },
   
-  delete<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
-    return service.delete(url, config)
+  delete<T = any>(url: string, config?: AxiosRequestConfig): Promise<T> {
+    return service.delete<any, T>(url, config)
   }
 }
 

@@ -5,7 +5,7 @@
     </el-aside>
     <el-container>
       <el-header class="layout-header">
-        <Header @toggle="toggleCollapse" />
+        <Header :is-collapsed="isCollapsed" @toggle="toggleCollapse" />
       </el-header>
       <el-main class="layout-main">
         <router-view v-slot="{ Component }">

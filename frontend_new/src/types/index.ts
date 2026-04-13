@@ -1,36 +1,54 @@
-// 用户角色
-export type UserRole = 'admin' | 'counselor' | 'student'
+﻿export type UserRole = 'admin' | 'counselor' | 'student'
 
-// 角色常量（用于代码中引用）
 export const USER_ROLES = {
   ADMIN: 'admin' as UserRole,
   COUNSELOR: 'counselor' as UserRole,
-  STUDENT: 'student' as UserRole
+  STUDENT: 'student' as UserRole,
 }
 
-// 预警状态
-export enum AlertStatus {
-  PENDING = 'pending',
-  PROCESSING = 'processing',
-  RESOLVED = 'resolved',
-  IGNORED = 'ignored'
-}
+export type AlertStatus = 'pending' | 'processing' | 'resolved' | 'ignored'
 
-// 预警级别
-export enum AlertLevel {
-  WARNING = 'warning',
-  SERIOUS = 'serious',
-  URGENT = 'urgent'
-}
+export const ALERT_STATUSES = {
+  PENDING: 'pending',
+  PROCESSING: 'processing',
+  RESOLVED: 'resolved',
+  IGNORED: 'ignored',
+} as const
 
-// 规则类型
-export enum RuleType {
-  SCORE = 'score',
-  ATTENDANCE = 'attendance',
-  GRADUATION = 'graduation'
-}
+export type AlertLevel = 'warning' | 'serious' | 'urgent'
 
-// 用户信息
+export const ALERT_LEVELS = {
+  WARNING: 'warning',
+  SERIOUS: 'serious',
+  URGENT: 'urgent',
+} as const
+
+export type RuleType = 'score' | 'attendance' | 'graduation'
+
+export const RULE_TYPES = {
+  SCORE: 'score',
+  ATTENDANCE: 'attendance',
+  GRADUATION: 'graduation',
+} as const
+
+export type TargetType = 'all' | 'grades' | 'classes'
+
+export const TARGET_TYPES = {
+  ALL: 'all',
+  GRADES: 'grades',
+  CLASSES: 'classes',
+} as const
+
+export type CourseType = 'required' | 'elective' | 'public' | 'professional' | 'practice'
+
+export const COURSE_TYPES = {
+  REQUIRED: 'required' as CourseType,
+  ELECTIVE: 'elective' as CourseType,
+  PUBLIC: 'public' as CourseType,
+  PROFESSIONAL: 'professional' as CourseType,
+  PRACTICE: 'practice' as CourseType,
+} as const
+
 export interface User {
   id: number
   username: string
@@ -41,7 +59,6 @@ export interface User {
   first_login?: boolean
   email?: string
   student_id?: number
-  // 关联的学生信息（学生角色才有）
   student?: {
     id: number
     name: string
@@ -52,7 +69,6 @@ export interface User {
   }
 }
 
-// 用户详细信息（个人信息页面）
 export interface UserProfile {
   id: number
   username: string
@@ -65,13 +81,11 @@ export interface UserProfile {
   is_active: boolean
   first_login: boolean
   created_at?: string
-  // 关联的学生信息
   student_name?: string
   student_no?: string
   class_name?: string
 }
 
-// 更新个人信息请求
 export interface UserProfileUpdate {
   nickname?: string
   email?: string
@@ -79,13 +93,11 @@ export interface UserProfileUpdate {
   bio?: string
 }
 
-// 登录请求
 export interface LoginRequest {
   username: string
   password: string
 }
 
-// 登录响应
 export interface LoginResponse {
   access_token: string
   refresh_token: string
@@ -95,25 +107,21 @@ export interface LoginResponse {
   require_password_change?: boolean
 }
 
-// 修改密码请求
 export interface ChangePasswordRequest {
   old_password?: string
   new_password: string
 }
 
-// 发送验证码请求
 export interface SendCodeRequest {
   email: string
 }
 
-// 重置密码请求
 export interface ResetPasswordRequest {
   email: string
   code: string
   new_password: string
 }
 
-// 导入结果
 export interface ImportResult {
   total: number
   success: number
@@ -122,7 +130,6 @@ export interface ImportResult {
   created_users: number
 }
 
-// 学生信息
 export interface Student {
   id: number
   student_no: string
@@ -136,7 +143,6 @@ export interface Student {
   status: string
 }
 
-// 成绩信息
 export interface Score {
   id: number
   course_name: string
@@ -147,7 +153,6 @@ export interface Score {
   is_passed: boolean
 }
 
-// 考勤信息
 export interface Attendance {
   id: number
   course_name: string
@@ -155,7 +160,6 @@ export interface Attendance {
   status: string
 }
 
-// 规则信息
 export interface Rule {
   id: number
   name: string
@@ -166,9 +170,26 @@ export interface Rule {
   description?: string
   message_template?: string
   is_active: boolean
+  target_type: TargetType
+  target_grades?: string[] | null
+  target_classes?: number[] | null
 }
 
-// 预警信息
+export interface Course {
+  id: number
+  course_code: string
+  course_name: string
+  credit: number
+  semester: string
+  class_id?: number
+  class_name?: string | null
+  grade?: string | null
+  department_name?: string | null
+  teacher_name?: string
+  course_type: CourseType
+  course_type_name?: string
+}
+
 export interface Alert {
   id: number
   student_id: number
@@ -184,7 +205,6 @@ export interface Alert {
   created_at: string
 }
 
-// 预警详情
 export interface AlertDetail extends Alert {
   student?: {
     id: number
@@ -197,13 +217,18 @@ export interface AlertDetail extends Alert {
   rule?: {
     id: number
     name: string
+    code?: string
     type: string
     level: string
+    description?: string
+    conditions?: Record<string, any>
+    message_template?: string
   }
   records: AlertRecord[]
 }
 
-// 预警处理记录
+export type ElementTagType = '' | 'success' | 'warning' | 'info' | 'primary' | 'danger'
+
 export interface AlertRecord {
   id: number
   handler_name?: string
@@ -212,7 +237,6 @@ export interface AlertRecord {
   created_at: string
 }
 
-// 分页响应
 export interface PageResponse<T> {
   items: T[]
   total: number
@@ -220,7 +244,6 @@ export interface PageResponse<T> {
   page_size: number
 }
 
-// 仪表盘数据
 export interface DashboardOverview {
   student_count: number
   alert_count: {
@@ -234,7 +257,6 @@ export interface DashboardOverview {
   recent_alerts: Alert[]
 }
 
-// 预警趋势数据
 export interface TrendData {
   days: number
   data: Array<{
@@ -243,7 +265,6 @@ export interface TrendData {
   }>
 }
 
-// 预警分布数据
 export interface DistributionData {
   by_class: Array<{
     class_name: string

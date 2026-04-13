@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="sidebar">
     <div class="logo">
       <el-icon :size="28"><Warning /></el-icon>
@@ -27,7 +27,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h } from 'vue'
+import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import {
@@ -39,7 +39,8 @@ import {
   Avatar,
   Document,
   Calendar,
-  TrendCharts
+  TrendCharts,
+  Reading
 } from '@element-plus/icons-vue'
 import type { UserRole } from '@/types'
 
@@ -52,7 +53,6 @@ const userStore = useUserStore()
 
 const activeMenu = computed(() => route.path)
 
-// 图标映射
 const iconMap: Record<string, any> = {
   DataAnalysis,
   User,
@@ -62,18 +62,16 @@ const iconMap: Record<string, any> = {
   Warning,
   Document,
   Calendar,
-  TrendCharts
+  TrendCharts,
+  Reading
 }
 
-// 获取图标组件
 const getIconComponent = (iconName?: string) => {
   if (!iconName) return Warning
   return iconMap[iconName] || Warning
 }
 
-// 根据角色定义菜单配置
 const menuConfig: Record<UserRole, { basePath: string; items: any[] }> = {
-  // 管理员菜单
   admin: {
     basePath: '/',
     items: [
@@ -81,12 +79,12 @@ const menuConfig: Record<UserRole, { basePath: string; items: any[] }> = {
       { path: '/students', title: '学生管理', icon: 'User' },
       { path: '/scores', title: '成绩管理', icon: 'TrendCharts' },
       { path: '/attendances', title: '考勤管理', icon: 'Calendar' },
+      { path: '/courses', title: '课程管理', icon: 'Reading' },
       { path: '/rules', title: '规则配置', icon: 'Setting' },
       { path: '/alerts', title: '预警中心', icon: 'Bell' },
       { path: '/users', title: '用户管理', icon: 'Avatar' }
     ]
   },
-  // 辅导员菜单
   counselor: {
     basePath: '/',
     items: [
@@ -97,7 +95,6 @@ const menuConfig: Record<UserRole, { basePath: string; items: any[] }> = {
       { path: '/alerts', title: '预警中心', icon: 'Bell' }
     ]
   },
-  // 学生菜单
   student: {
     basePath: '/student',
     items: [
@@ -109,16 +106,13 @@ const menuConfig: Record<UserRole, { basePath: string; items: any[] }> = {
   }
 }
 
-// 计算可见的菜单项
 const visibleMenuItems = computed(() => {
   const role = userStore.userInfo?.role as UserRole | undefined
-
   if (!role || !menuConfig[role]) {
     return []
   }
 
-  const config = menuConfig[role]
-  return config.items.map(item => ({
+  return menuConfig[role].items.map(item => ({
     path: item.path,
     meta: {
       title: item.title,

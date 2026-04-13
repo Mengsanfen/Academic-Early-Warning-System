@@ -10,6 +10,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
 
 from app.database import SessionLocal, engine, Base
+from app.schema_sync import ensure_runtime_schema
 from app.core.data_simulation.simulator import DataSimulator, SimulationConfig
 
 
@@ -20,6 +21,7 @@ def init_database():
     # 创建所有表
     print("  [1] 创建数据表...")
     Base.metadata.create_all(bind=engine)
+    ensure_runtime_schema(engine)
     print("  [OK] 数据表创建完成")
 
     # 创建数据库会话

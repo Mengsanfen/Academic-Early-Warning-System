@@ -325,7 +325,8 @@ def get_my_attendance(
     # 状态过滤
     if status:
         try:
-            status_enum = AttendanceStatus(status)
+            normalized_status = "present" if status == "normal" else status
+            status_enum = AttendanceStatus(normalized_status)
             query = query.filter(Attendance.status == status_enum)
         except ValueError:
             pass
@@ -390,7 +391,7 @@ def get_my_alerts(
     page_size: int = 20,
     type: Optional[str] = None,
     level: Optional[str] = None,
-    status_filter: Optional[str] = None,
+    status: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -443,9 +444,9 @@ def get_my_alerts(
             query = query.filter(Alert.level == level_mapping[level])
 
     # 状态过滤
-    if status_filter:
+    if status:
         try:
-            status_enum = AlertStatus(status_filter)
+            status_enum = AlertStatus(status)
             query = query.filter(Alert.status == status_enum)
         except ValueError:
             pass

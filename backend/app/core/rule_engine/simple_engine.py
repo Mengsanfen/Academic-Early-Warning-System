@@ -3,6 +3,7 @@
 
 基于 Python operator 模块实现安全的动态规则解析
 包含完善的错误处理和容错机制
+支持规则目标范围筛选和课程类型筛选
 """
 import operator
 import logging
@@ -14,7 +15,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.core.rule_engine.comprehensive_rule import ensure_comprehensive_rule, evaluate_comprehensive_rule
-from app.models.rule import COMPREHENSIVE_RULE_CODE, COMPREHENSIVE_RULE_MODE
+from app.models.rule import COMPREHENSIVE_RULE_CODE, COMPREHENSIVE_RULE_MODE, TargetType
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,8 @@ class SimpleRuleEngine:
     2. 安全执行比较运算
     3. 计算学生各项指标
     4. 生成预警记录
+    5. 支持规则目标范围筛选（年级/班级）
+    6. 支持按课程类型筛选
     """
 
     # 支持的比较运算符映射
@@ -57,9 +60,20 @@ class SimpleRuleEngine:
         'avg_score',       # 平均成绩
         'fail_count',      # 挂科门数
         'gpa',             # 绩点
+        'earned_credit',   # 已获学分
+        'failed_credit',   # 未获学分
         'attendance_rate', # 出勤率
         'absence_count',   # 缺勤次数
         'late_count',      # 迟到次数
+    }
+
+    # 课程类型映射
+    COURSE_TYPES = {
+        'required',      # 必修课
+        'elective',      # 选修课
+        'public',        # 公共课
+        'professional',  # 专业课
+        'practice',      # 实践课
     }
 
     def __init__(self, db: Session):
@@ -98,18 +112,9 @@ class SimpleRuleEngine:
 
             stats["total_rules"] = len(rules)
 
-            # 2. 加载所有活跃学生
-            students = self.db.query(Student).filter(Student.is_active == True).all()
-            if not students:
-                logger.warning("没有找到活跃的学生")
-                return stats
-
-            stats["total_students"] = len(students)
-            stats["total_checked"] = len(students)
-
-            # 3. 逐条规则执行
+            # 2. 逐条规则执行（每条规则有自己的目标学生范围）
             for rule in rules:
-                rule_result = self._execute_single_rule(rule, students, stats)
+                rule_result = self._execute_single_rule(rule, stats)
                 stats["rule_details"].append(rule_result)
 
             self.db.commit()
@@ -125,14 +130,44 @@ class SimpleRuleEngine:
 
         return stats
 
-    def _execute_single_rule(self, rule: Any, students: List[Any],
-                            stats: Dict[str, Any]) -> Dict[str, Any]:
+    def _get_target_students(self, rule: Any) -> List[Any]:
+        """
+        根据规则的目标范围配置获取目标学生列表
+
+        Args:
+            rule: 规则对象
+
+        Returns:
+            目标学生列表
+        """
+        from app.models.student import Student, Class
+
+        # 基础查询：只查询活跃学生
+        query = self.db.query(Student).filter(Student.is_active == True)
+
+        # 根据目标类型筛选
+        if rule.target_type == TargetType.ALL:
+            # 全部学生，不额外过滤
+            pass
+
+        elif rule.target_type == TargetType.GRADES:
+            # 按年级筛选
+            if rule.target_grades and isinstance(rule.target_grades, list):
+                query = query.join(Class).filter(Class.grade.in_(rule.target_grades))
+
+        elif rule.target_type == TargetType.CLASSES:
+            # 按班级筛选
+            if rule.target_classes and isinstance(rule.target_classes, list):
+                query = query.filter(Student.class_id.in_(rule.target_classes))
+
+        return query.all()
+
+    def _execute_single_rule(self, rule: Any, stats: Dict[str, Any]) -> Dict[str, Any]:
         """
         执行单条规则
 
         Args:
             rule: 规则对象
-            students: 学生列表
             stats: 统计信息字典
 
         Returns:
@@ -150,6 +185,16 @@ class SimpleRuleEngine:
         }
 
         try:
+            # 获取该规则的目标学生
+            students = self._get_target_students(rule)
+            if not students:
+                logger.warning(f"规则 {rule.id} 没有目标学生")
+                return result
+
+            # 更新统计
+            stats["total_students"] = max(stats["total_students"], len(students))
+            stats["total_checked"] += len(students)
+
             # 解析规则条件
             conditions = self._parse_conditions(rule.conditions)
             if conditions is None:
@@ -170,7 +215,7 @@ class SimpleRuleEngine:
                             stats["alerts_created"] += 1
                             result["alerts_created"] += 1
                     except Exception as e:
-                        logger.warning(f"澶勭悊瀛︾敓 {student.id} 缁煎悎瑙勫垯 {rule.id} 鏃跺嚭閿? {e}")
+                        logger.warning(f"处理学生 {student.id} 综合规则 {rule.id} 时出错: {e}")
                         continue
                 return result
 
@@ -178,6 +223,7 @@ class SimpleRuleEngine:
             threshold = conditions.get("threshold")
             op_str = conditions.get("operator", "<")
             time_window = conditions.get("time_window")
+            course_type = conditions.get("course_type")  # 支持按课程类型筛选
 
             # 验证必要字段
             if metric_type is None or threshold is None:
@@ -193,9 +239,9 @@ class SimpleRuleEngine:
             # 遍历学生进行检测
             for student in students:
                 try:
-                    # 计算指标值
+                    # 计算指标值（支持课程类型筛选）
                     metric_value = self._calculate_metric(
-                        student.id, metric_type, time_window
+                        student.id, metric_type, time_window, course_type
                     )
 
                     # 如果无法计算（如无数据），跳过该学生
@@ -282,7 +328,8 @@ class SimpleRuleEngine:
     # ==================== 指标计算 ====================
 
     def _calculate_metric(self, student_id: int, metric_type: str,
-                         time_window: Optional[str] = None) -> Optional[float]:
+                         time_window: Optional[str] = None,
+                         course_type: Optional[str] = None) -> Optional[float]:
         """
         计算学生指标值
 
@@ -290,6 +337,7 @@ class SimpleRuleEngine:
             student_id: 学生ID
             metric_type: 指标类型
             time_window: 时间窗口
+            course_type: 课程类型筛选（required/elective/public/professional/practice）
 
         Returns:
             指标值，无法计算时返回 None
@@ -300,19 +348,23 @@ class SimpleRuleEngine:
 
             # 根据指标类型调用对应计算方法
             if metric_type == "score":
-                return self._calc_latest_score(student_id, start_date)
+                return self._calc_latest_score(student_id, start_date, course_type)
             elif metric_type == "avg_score":
-                return self._calc_avg_score(student_id, start_date)
+                return self._calc_avg_score(student_id, start_date, course_type)
             elif metric_type == "fail_count":
-                return self._calc_fail_count(student_id, start_date)
+                return self._calc_fail_count(student_id, start_date, course_type)
             elif metric_type == "gpa":
-                return self._calc_gpa(student_id, start_date)
+                return self._calc_gpa(student_id, start_date, course_type)
+            elif metric_type == "earned_credit":
+                return self._calc_earned_credit(student_id, start_date, course_type)
+            elif metric_type == "failed_credit":
+                return self._calc_failed_credit(student_id, start_date, course_type)
             elif metric_type == "attendance_rate":
-                return self._calc_attendance_rate(student_id, start_date)
+                return self._calc_attendance_rate(student_id, start_date, course_type)
             elif metric_type == "absence_count":
-                return self._calc_absence_count(student_id, start_date)
+                return self._calc_absence_count(student_id, start_date, course_type)
             elif metric_type == "late_count":
-                return self._calc_late_count(student_id, start_date)
+                return self._calc_late_count(student_id, start_date, course_type)
             else:
                 logger.warning(f"未知的指标类型: {metric_type}")
                 return None
@@ -328,6 +380,12 @@ class SimpleRuleEngine:
 
         now = datetime.now()
         window_map = {
+            "1w": timedelta(weeks=1),
+            "2w": timedelta(weeks=2),
+            "1m": timedelta(days=30),
+            "3m": timedelta(days=90),
+            "1term": timedelta(days=150),
+            "1y": timedelta(days=365),
             "1周": timedelta(weeks=1),
             "2周": timedelta(weeks=2),
             "1个月": timedelta(days=30),
@@ -342,15 +400,66 @@ class SimpleRuleEngine:
             return now - delta
         return None
 
+    def _get_score_records(
+        self,
+        student_id: int,
+        start_date: Optional[datetime],
+        course_type: Optional[str] = None,
+    ) -> List[Any]:
+        from app.models.score import Score
+        from app.models.course import Course, CourseType
+
+        query = self.db.query(Score).join(Course, Score.course_id == Course.id).filter(
+            Score.student_id == student_id
+        )
+
+        if start_date:
+            query = query.filter(Score.created_at >= start_date)
+
+        if course_type:
+            try:
+                query = query.filter(Course.course_type == CourseType(course_type))
+            except ValueError:
+                logger.warning(f"未知的课程类型: {course_type}")
+                return []
+
+        return query.order_by(Score.course_id.asc(), Score.created_at.desc(), Score.id.desc()).all()
+
+    def _get_latest_scores_by_course(
+        self,
+        student_id: int,
+        start_date: Optional[datetime],
+        course_type: Optional[str] = None,
+    ) -> List[Any]:
+        records = self._get_score_records(student_id, start_date, course_type)
+        latest_records: Dict[int, Any] = {}
+        for record in records:
+            if record.course_id not in latest_records:
+                latest_records[record.course_id] = record
+        return list(latest_records.values())
+
     def _calc_latest_score(self, student_id: int,
-                          start_date: Optional[datetime]) -> Optional[float]:
+                          start_date: Optional[datetime],
+                          course_type: Optional[str] = None) -> Optional[float]:
         """计算最新一门成绩"""
         from app.models.score import Score
+        from app.models.course import Course, CourseType
 
         try:
-            query = self.db.query(Score).filter(Score.student_id == student_id)
+            query = self.db.query(Score).join(
+                Course, Score.course_id == Course.id
+            ).filter(Score.student_id == student_id)
+
             if start_date:
                 query = query.filter(Score.created_at >= start_date)
+
+            # 按课程类型筛选
+            if course_type:
+                try:
+                    course_type_enum = CourseType(course_type)
+                    query = query.filter(Course.course_type == course_type_enum)
+                except ValueError:
+                    logger.warning(f"未知的课程类型: {course_type}")
 
             score = query.order_by(Score.created_at.desc()).first()
             if score and score.score is not None:
@@ -361,19 +470,15 @@ class SimpleRuleEngine:
             return None
 
     def _calc_avg_score(self, student_id: int,
-                       start_date: Optional[datetime]) -> Optional[float]:
+                       start_date: Optional[datetime],
+                       course_type: Optional[str] = None) -> Optional[float]:
         """计算平均成绩"""
-        from app.models.score import Score
-
         try:
-            query = self.db.query(Score).filter(
-                Score.student_id == student_id,
-                Score.score.isnot(None)
-            )
-            if start_date:
-                query = query.filter(Score.created_at >= start_date)
-
-            scores = query.all()
+            scores = [
+                score
+                for score in self._get_latest_scores_by_course(student_id, start_date, course_type)
+                if score.score is not None
+            ]
             if not scores:
                 return None
 
@@ -384,38 +489,26 @@ class SimpleRuleEngine:
             return None
 
     def _calc_fail_count(self, student_id: int,
-                        start_date: Optional[datetime]) -> int:
+                        start_date: Optional[datetime],
+                        course_type: Optional[str] = None) -> int:
         """计算挂科门数"""
-        from app.models.score import Score
-
         try:
-            query = self.db.query(Score).filter(
-                Score.student_id == student_id,
-                Score.score < 60
+            latest_scores = self._get_latest_scores_by_course(student_id, start_date, course_type)
+            return sum(
+                1
+                for score in latest_scores
+                if score.score is not None and float(score.score) < 60
             )
-            if start_date:
-                query = query.filter(Score.created_at >= start_date)
-
-            return query.count()
         except Exception as e:
             logger.error(f"计算挂科门数失败: {e}")
             return 0
 
     def _calc_gpa(self, student_id: int,
-                  start_date: Optional[datetime]) -> float:
+                  start_date: Optional[datetime],
+                  course_type: Optional[str] = None) -> float:
         """计算 GPA（标准4.0制）"""
-        from app.models.score import Score
-        from app.models.course import Course
-
         try:
-            query = self.db.query(Score).join(
-                Course, Score.course_id == Course.id
-            ).filter(Score.student_id == student_id)
-
-            if start_date:
-                query = query.filter(Score.created_at >= start_date)
-
-            scores = query.all()
+            scores = self._get_latest_scores_by_course(student_id, start_date, course_type)
             if not scores:
                 return 0.0
 
@@ -438,6 +531,42 @@ class SimpleRuleEngine:
             return round(total_points / total_credits, 2)
         except Exception as e:
             logger.error(f"计算GPA失败: {e}")
+            return 0.0
+
+    def _calc_earned_credit(
+        self,
+        student_id: int,
+        start_date: Optional[datetime],
+        course_type: Optional[str] = None,
+    ) -> float:
+        try:
+            scores = self._get_latest_scores_by_course(student_id, start_date, course_type)
+            total = sum(
+                float(score.course.credit)
+                for score in scores
+                if score.course and score.score is not None and float(score.score) >= 60
+            )
+            return round(total, 2)
+        except Exception as e:
+            logger.error(f"计算已获学分失败: {e}")
+            return 0.0
+
+    def _calc_failed_credit(
+        self,
+        student_id: int,
+        start_date: Optional[datetime],
+        course_type: Optional[str] = None,
+    ) -> float:
+        try:
+            scores = self._get_latest_scores_by_course(student_id, start_date, course_type)
+            total = sum(
+                float(score.course.credit)
+                for score in scores
+                if score.course and score.score is not None and float(score.score) < 60
+            )
+            return round(total, 2)
+        except Exception as e:
+            logger.error(f"计算未获学分失败: {e}")
             return 0.0
 
     def _score_to_gpa(self, score: float) -> float:
@@ -464,16 +593,29 @@ class SimpleRuleEngine:
             return 0.0
 
     def _calc_attendance_rate(self, student_id: int,
-                              start_date: Optional[datetime]) -> float:
+                              start_date: Optional[datetime],
+                              course_type: Optional[str] = None) -> float:
         """计算出勤率（正常出勤的比例）"""
         from app.models.attendance import Attendance, AttendanceStatus
+        from app.models.course import Course, CourseType
 
         try:
-            query = self.db.query(Attendance).filter(
+            query = self.db.query(Attendance).join(
+                Course, Attendance.course_id == Course.id
+            ).filter(
                 Attendance.student_id == student_id
             )
+
             if start_date:
                 query = query.filter(Attendance.date >= start_date.date())
+
+            # 按课程类型筛选
+            if course_type:
+                try:
+                    course_type_enum = CourseType(course_type)
+                    query = query.filter(Course.course_type == course_type_enum)
+                except ValueError:
+                    logger.warning(f"未知的课程类型: {course_type}")
 
             attendances = query.all()
             if not attendances:
@@ -490,17 +632,30 @@ class SimpleRuleEngine:
             return 1.0
 
     def _calc_absence_count(self, student_id: int,
-                           start_date: Optional[datetime]) -> int:
+                           start_date: Optional[datetime],
+                           course_type: Optional[str] = None) -> int:
         """计算缺勤次数"""
         from app.models.attendance import Attendance, AttendanceStatus
+        from app.models.course import Course, CourseType
 
         try:
-            query = self.db.query(Attendance).filter(
+            query = self.db.query(Attendance).join(
+                Course, Attendance.course_id == Course.id
+            ).filter(
                 Attendance.student_id == student_id,
                 Attendance.status == AttendanceStatus.ABSENT
             )
+
             if start_date:
                 query = query.filter(Attendance.date >= start_date.date())
+
+            # 按课程类型筛选
+            if course_type:
+                try:
+                    course_type_enum = CourseType(course_type)
+                    query = query.filter(Course.course_type == course_type_enum)
+                except ValueError:
+                    logger.warning(f"未知的课程类型: {course_type}")
 
             return query.count()
         except Exception as e:
@@ -508,17 +663,30 @@ class SimpleRuleEngine:
             return 0
 
     def _calc_late_count(self, student_id: int,
-                        start_date: Optional[datetime]) -> int:
+                        start_date: Optional[datetime],
+                        course_type: Optional[str] = None) -> int:
         """计算迟到次数"""
         from app.models.attendance import Attendance, AttendanceStatus
+        from app.models.course import Course, CourseType
 
         try:
-            query = self.db.query(Attendance).filter(
+            query = self.db.query(Attendance).join(
+                Course, Attendance.course_id == Course.id
+            ).filter(
                 Attendance.student_id == student_id,
                 Attendance.status == AttendanceStatus.LATE
             )
+
             if start_date:
                 query = query.filter(Attendance.date >= start_date.date())
+
+            # 按课程类型筛选
+            if course_type:
+                try:
+                    course_type_enum = CourseType(course_type)
+                    query = query.filter(Course.course_type == course_type_enum)
+                except ValueError:
+                    logger.warning(f"未知的课程类型: {course_type}")
 
             return query.count()
         except Exception as e:
