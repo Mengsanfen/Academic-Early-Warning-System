@@ -232,3 +232,107 @@ def test_comprehensive_rule_reexecution_auto_resolves_after_recovery(db_session)
 
     db_session.refresh(alert)
     assert alert.status == AlertStatus.RESOLVED
+
+
+def test_composite_credit_rule_supports_required_and_elective_conditions(db_session):
+    clazz, student = seed_student_with_class(db_session)
+    required_course = Course(
+        course_code="REQ101",
+        course_name="专业核心课",
+        credit=3,
+        semester="2024-2025-1",
+        class_id=clazz.id,
+        course_type=CourseType.REQUIRED,
+    )
+    elective_course = Course(
+        course_code="ELE101",
+        course_name="通识选修课",
+        credit=2,
+        semester="2024-2025-1",
+        class_id=clazz.id,
+        course_type=CourseType.ELECTIVE,
+    )
+    db_session.add_all([required_course, elective_course])
+    db_session.flush()
+
+    db_session.add_all([
+        Score(student_id=student.id, course_id=required_course.id, score=80, semester="2024-2025-1", exam_type="期末"),
+        Score(student_id=student.id, course_id=elective_course.id, score=85, semester="2024-2025-1", exam_type="期末"),
+    ])
+    db_session.add(
+        Rule(
+            name="毕业分类学分组合预警",
+            code="GRADUATION_CREDIT_COMPOSITE",
+            type=RuleType.GRADUATION,
+            conditions={
+                "mode": "composite",
+                "logic": "any",
+                "items": [
+                    {
+                        "label": "必修学分要求",
+                        "metric": "earned_credit",
+                        "operator": "<",
+                        "threshold": 4,
+                        "course_type": "required",
+                        "time_window": "1y",
+                    },
+                    {
+                        "label": "选修学分要求",
+                        "metric": "earned_credit",
+                        "operator": "<",
+                        "threshold": 3,
+                        "course_type": "elective",
+                        "time_window": "1y",
+                    },
+                ],
+            },
+            level=AlertLevel.SERIOUS,
+            is_active=True,
+            target_type=TargetType.ALL,
+        )
+    )
+    db_session.commit()
+
+    engine = SimpleRuleEngine(db_session)
+    first_run = engine.execute_all_rules()
+    assert first_run["alerts_created"] == 1
+
+    alert = (
+        db_session.query(Alert)
+        .join(Alert.rule)
+        .filter(Alert.student_id == student.id, Rule.code == "GRADUATION_CREDIT_COMPOSITE")
+        .one()
+    )
+    assert alert.status == AlertStatus.PENDING
+    assert "必修学分要求" in alert.message
+    assert "选修学分要求" in alert.message
+
+    required_extra = Course(
+        course_code="REQ102",
+        course_name="专业实践课",
+        credit=1,
+        semester="2024-2025-1",
+        class_id=clazz.id,
+        course_type=CourseType.REQUIRED,
+    )
+    elective_extra = Course(
+        course_code="ELE102",
+        course_name="创新创业",
+        credit=1,
+        semester="2024-2025-1",
+        class_id=clazz.id,
+        course_type=CourseType.ELECTIVE,
+    )
+    db_session.add_all([required_extra, elective_extra])
+    db_session.flush()
+    db_session.add_all([
+        Score(student_id=student.id, course_id=required_extra.id, score=90, semester="2024-2025-1", exam_type="期末"),
+        Score(student_id=student.id, course_id=elective_extra.id, score=90, semester="2024-2025-1", exam_type="期末"),
+    ])
+    db_session.commit()
+
+    second_run = engine.execute_all_rules()
+    assert second_run["alerts_resolved"] == 1
+
+    db_session.refresh(alert)
+    assert alert.status == AlertStatus.RESOLVED

@@ -103,7 +103,7 @@
       </div>
     </el-card>
 
-    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="820px" :close-on-click-modal="false" @closed="resetForm">
+    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="900px" :close-on-click-modal="false" @closed="resetForm">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="104px">
         <div class="section-title">基础信息</div>
         <el-row :gutter="16">
@@ -159,32 +159,38 @@
         </el-form-item>
 
         <div class="section-title">规则条件</div>
-        <el-form-item v-if="form.type === 'graduation'" label="判定模式">
+        <el-form-item label="判定模式">
           <el-radio-group v-model="form.condition_mode">
             <el-radio-button label="standard">单项规则</el-radio-button>
-            <el-radio-button label="comprehensive">综合风险</el-radio-button>
+            <el-radio-button label="composite">组合条件</el-radio-button>
+            <el-radio-button label="comprehensive" :disabled="form.type !== 'graduation'">综合风险</el-radio-button>
           </el-radio-group>
         </el-form-item>
 
         <template v-if="form.condition_mode === 'standard'">
-          <el-row :gutter="16">
-            <el-col :span="12">
+          <el-row :gutter="16" class="condition-row">
+            <el-col :xs="24" :sm="12" :md="11">
               <el-form-item label="监测指标">
                 <el-select v-model="form.standard.metric" style="width: 100%" @change="handleMetricChange">
                   <el-option v-for="item in filteredMetrics" :key="item.value" :label="item.label" :value="item.value ?? ''" />
                 </el-select>
               </el-form-item>
             </el-col>
-            <el-col :span="6">
-              <el-form-item label="运算符">
+            <el-col :xs="24" :sm="12" :md="5">
+              <el-form-item label="运算符" label-width="72px">
                 <el-select v-model="form.standard.operator" style="width: 100%">
                   <el-option v-for="item in templateOptions.operators" :key="item.value" :label="item.label" :value="item.value ?? ''" />
                 </el-select>
               </el-form-item>
             </el-col>
-            <el-col :span="6">
-              <el-form-item label="阈值">
-                <el-input-number v-model="form.standard.threshold" :precision="2" style="width: 100%" />
+            <el-col :xs="24" :sm="12" :md="8">
+              <el-form-item label="阈值" label-width="56px">
+                <el-input-number
+                  v-model="form.standard.threshold"
+                  :precision="2"
+                  controls-position="right"
+                  class="rule-number-input"
+                />
               </el-form-item>
             </el-col>
           </el-row>
@@ -207,16 +213,120 @@
           <el-alert type="info" :closable="false" show-icon :title="selectedMetricTip" />
         </template>
 
+        <template v-else-if="form.condition_mode === 'composite'">
+          <div class="composite-toolbar">
+            <div>
+              <div class="composite-title">组合条件规则</div>
+              <div class="composite-hint">适合毕业审核、分类学分、成绩与考勤联动等多指标场景。</div>
+            </div>
+            <el-radio-group v-model="form.composite.logic">
+              <el-radio-button label="any">任一条件触发</el-radio-button>
+              <el-radio-button label="all">全部条件同时触发</el-radio-button>
+            </el-radio-group>
+          </div>
+
+          <div class="condition-list">
+            <div v-for="(item, index) in form.composite.items" :key="index" class="condition-card">
+              <div class="condition-card-header">
+                <div>
+                  <span class="condition-index">条件 {{ index + 1 }}</span>
+                  <span class="condition-preview">{{ formatConditionItemPreview(item) }}</span>
+                </div>
+                <el-button
+                  link
+                  type="danger"
+                  :disabled="form.composite.items.length === 1"
+                  @click="removeCompositeCondition(index)"
+                >
+                  删除
+                </el-button>
+              </div>
+
+              <el-row :gutter="14">
+                <el-col :xs="24" :sm="12" :md="8">
+                  <el-form-item label="条件名称" label-width="76px">
+                    <el-input v-model="item.label" placeholder="如：必修学分要求" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :sm="12" :md="8">
+                  <el-form-item label="监测指标" label-width="76px">
+                    <el-select v-model="item.metric" style="width: 100%" @change="handleCompositeMetricChange(item)">
+                      <el-option v-for="metric in filteredMetrics" :key="metric.value" :label="metric.label" :value="metric.value ?? ''" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :sm="12" :md="8">
+                  <el-form-item label="课程类型" label-width="76px">
+                    <el-select
+                      v-model="item.course_type"
+                      clearable
+                      :disabled="!getCompositeMetricMeta(item)?.supports_course_type"
+                      style="width: 100%"
+                      placeholder="不限课程类型"
+                    >
+                      <el-option v-for="courseType in templateOptions.course_types" :key="courseType.value" :label="courseType.label" :value="courseType.value ?? ''" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+              </el-row>
+
+              <el-row :gutter="14">
+                <el-col :xs="24" :sm="8">
+                  <el-form-item label="运算符" label-width="76px">
+                    <el-select v-model="item.operator" style="width: 100%">
+                      <el-option v-for="operator in templateOptions.operators" :key="operator.value" :label="operator.label" :value="operator.value ?? ''" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :sm="8">
+                  <el-form-item label="阈值" label-width="56px">
+                    <el-input-number v-model="item.threshold" :precision="2" controls-position="right" class="rule-number-input" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :sm="8">
+                  <el-form-item label="统计窗口" label-width="76px">
+                    <el-select
+                      v-model="item.time_window"
+                      clearable
+                      :disabled="!getCompositeMetricMeta(item)?.supports_time_window"
+                      style="width: 100%"
+                    >
+                      <el-option v-for="window in templateOptions.time_windows" :key="String(window.value)" :label="window.label" :value="window.value ?? ''" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </div>
+          </div>
+
+          <el-button class="add-condition-btn" type="primary" plain @click="addCompositeCondition">
+            <el-icon><Plus /></el-icon>
+            添加条件
+          </el-button>
+        </template>
+
         <template v-else>
           <el-row :gutter="16">
             <el-col :span="12">
               <el-form-item label="挂科门数阈值">
-                <el-input-number v-model="form.comprehensive.fail_count_threshold" :min="0" :max="20" style="width: 100%" />
+                <el-input-number
+                  v-model="form.comprehensive.fail_count_threshold"
+                  :min="0"
+                  :max="20"
+                  controls-position="right"
+                  class="rule-number-input"
+                />
               </el-form-item>
             </el-col>
             <el-col :span="12">
               <el-form-item label="缺勤次数阈值">
-                <el-input-number v-model="form.comprehensive.absence_count_threshold" :min="0" :max="100" style="width: 100%" />
+                <el-input-number
+                  v-model="form.comprehensive.absence_count_threshold"
+                  :min="0"
+                  :max="100"
+                  controls-position="right"
+                  class="rule-number-input"
+                />
               </el-form-item>
             </el-col>
           </el-row>
@@ -228,7 +338,7 @@
           <el-input v-model="form.description" type="textarea" :rows="2" placeholder="请输入规则业务含义" />
         </el-form-item>
         <el-form-item label="预警文案">
-          <el-input v-model="form.message_template" type="textarea" :rows="2" placeholder="支持 {student_name}、{metric_value}、{threshold} 等变量" />
+          <el-input v-model="form.message_template" type="textarea" :rows="2" placeholder="支持 {student_name}、{metric_value}、{threshold}、{condition_summary} 等变量" />
         </el-form-item>
         <el-form-item label="立即启用">
           <el-switch v-model="form.is_active" />
@@ -291,7 +401,17 @@ interface TemplateOptionsState {
   course_types: RuleCourseTypeOption[]
 }
 
-type ConditionMode = 'standard' | 'comprehensive'
+type ConditionMode = 'standard' | 'composite' | 'comprehensive'
+type CompositeLogic = 'any' | 'all'
+
+interface RuleConditionItem {
+  label: string
+  metric: string
+  operator: string
+  threshold: number
+  time_window: string
+  course_type: string
+}
 
 const METRIC_TYPE_MAP: Record<RuleType, string[]> = {
   score: ['score', 'avg_score', 'fail_count', 'gpa', 'earned_credit', 'failed_credit'],
@@ -303,6 +423,19 @@ const DEFAULT_STANDARD_BY_TYPE: Record<RuleType, { metric: string; operator: str
   score: { metric: 'score', operator: '<', threshold: 60, time_window: '1term' },
   attendance: { metric: 'absence_count', operator: '>=', threshold: 3, time_window: '1term' },
   graduation: { metric: 'earned_credit', operator: '<', threshold: 30, time_window: '1y' }
+}
+
+const createConditionItem = (type: RuleType = 'graduation', overrides: Partial<RuleConditionItem> = {}): RuleConditionItem => {
+  const preset = DEFAULT_STANDARD_BY_TYPE[type]
+  return {
+    label: '',
+    metric: preset.metric,
+    operator: preset.operator,
+    threshold: preset.threshold,
+    time_window: preset.time_window,
+    course_type: '',
+    ...overrides
+  }
 }
 
 const filters = reactive({
@@ -353,6 +486,13 @@ const form = reactive({
     threshold: 60,
     time_window: '1term',
     course_type: ''
+  },
+  composite: {
+    logic: 'any' as CompositeLogic,
+    items: [
+      createConditionItem('graduation', { label: '必修学分要求', metric: 'earned_credit', operator: '<', threshold: 30, course_type: 'required', time_window: '1y' }),
+      createConditionItem('graduation', { label: '选修学分要求', metric: 'earned_credit', operator: '<', threshold: 8, course_type: 'elective', time_window: '1y' })
+    ] as RuleConditionItem[]
   },
   comprehensive: {
     fail_count_threshold: 2,
@@ -417,6 +557,19 @@ const formatConditionSummary = (row: Rule) => {
   if (conditions.mode === 'comprehensive') {
     return `综合风险：挂科门数 >= ${conditions.fail_count_threshold} 且缺勤次数 >= ${conditions.absence_count_threshold}`
   }
+  if (conditions.mode === 'composite') {
+    const logicLabel = conditions.logic === 'all' ? '全部满足' : '任一触发'
+    const itemSummary = Array.isArray(conditions.items)
+      ? conditions.items
+          .map((item: any) => {
+            const operatorLabel = templateOptions.operators.find(option => option.value === item.operator)?.label || item.operator || ''
+            const courseLabel = item.course_type ? `·${getCourseTypeLabel(item.course_type)}` : ''
+            return `${item.label || getMetricLabel(item.metric)}${courseLabel} ${operatorLabel} ${item.threshold ?? '-'}`
+          })
+          .join('；')
+      : '未配置条件'
+    return `组合规则（${logicLabel}）：${itemSummary}`
+  }
   const operatorLabel = templateOptions.operators.find(item => item.value === conditions.operator)?.label || conditions.operator || ''
   const extras: string[] = []
   if (conditions.time_window) {
@@ -438,13 +591,19 @@ const resetStandardByType = (type: RuleType) => {
 }
 
 const handleTypeChange = () => {
-  if (form.type !== 'graduation') {
+  if (form.type !== 'graduation' && form.condition_mode === 'comprehensive') {
     form.condition_mode = 'standard'
   }
   const metricList = filteredMetrics.value.map(item => item.value)
   if (!metricList.includes(form.standard.metric)) {
     resetStandardByType(form.type)
   }
+  form.composite.items.forEach(item => {
+    if (!metricList.includes(item.metric)) {
+      Object.assign(item, createConditionItem(form.type, { label: item.label }))
+    }
+    handleCompositeMetricChange(item)
+  })
 }
 
 const handleMetricChange = () => {
@@ -454,6 +613,36 @@ const handleMetricChange = () => {
   if (!selectedMetricMeta.value?.supports_time_window) {
     form.standard.time_window = ''
   }
+}
+
+const getCompositeMetricMeta = (item: RuleConditionItem) => {
+  return filteredMetrics.value.find(metric => metric.value === item.metric) || filteredMetrics.value[0]
+}
+
+const handleCompositeMetricChange = (item: RuleConditionItem) => {
+  const meta = getCompositeMetricMeta(item)
+  if (!meta?.supports_course_type) {
+    item.course_type = ''
+  }
+  if (!meta?.supports_time_window) {
+    item.time_window = ''
+  }
+}
+
+const addCompositeCondition = () => {
+  form.composite.items.push(createConditionItem(form.type))
+}
+
+const removeCompositeCondition = (index: number) => {
+  if (form.composite.items.length <= 1) return
+  form.composite.items.splice(index, 1)
+}
+
+const formatConditionItemPreview = (item: RuleConditionItem) => {
+  const metricLabel = getMetricLabel(item.metric)
+  const operatorLabel = templateOptions.operators.find(option => option.value === item.operator)?.label || item.operator
+  const courseLabel = item.course_type ? ` · ${getCourseTypeLabel(item.course_type)}` : ''
+  return `${item.label || metricLabel}${courseLabel} ${operatorLabel} ${item.threshold}`
 }
 
 const handleTargetTypeChange = () => {
@@ -515,6 +704,20 @@ const buildConditionsPayload = () => {
       absence_count_threshold: Number(form.comprehensive.absence_count_threshold)
     }
   }
+  if (form.condition_mode === 'composite') {
+    return {
+      mode: 'composite',
+      logic: form.composite.logic,
+      items: form.composite.items.map(item => ({
+        label: item.label || undefined,
+        metric: item.metric,
+        operator: item.operator,
+        threshold: Number(item.threshold),
+        time_window: item.time_window || null,
+        course_type: item.course_type || null
+      }))
+    }
+  }
   return {
     metric: form.standard.metric,
     operator: form.standard.operator,
@@ -536,6 +739,17 @@ const validateBusinessForm = () => {
   if (form.condition_mode === 'standard') {
     if (!form.standard.metric || !form.standard.operator || form.standard.threshold === null || form.standard.threshold === undefined) {
       ElMessage.warning('请完整填写规则条件')
+      return false
+    }
+  }
+  if (form.condition_mode === 'composite') {
+    if (!form.composite.items.length) {
+      ElMessage.warning('组合规则至少需要一个条件')
+      return false
+    }
+    const invalidIndex = form.composite.items.findIndex(item => !item.metric || !item.operator || item.threshold === null || item.threshold === undefined)
+    if (invalidIndex >= 0) {
+      ElMessage.warning(`请完整填写组合条件 ${invalidIndex + 1}`)
       return false
     }
   }
@@ -562,6 +776,13 @@ const resetFormData = () => {
       time_window: '1term',
       course_type: ''
     },
+    composite: {
+      logic: 'any' as CompositeLogic,
+      items: [
+        createConditionItem('graduation', { label: '必修学分要求', metric: 'earned_credit', operator: '<', threshold: 30, course_type: 'required', time_window: '1y' }),
+        createConditionItem('graduation', { label: '选修学分要求', metric: 'earned_credit', operator: '<', threshold: 8, course_type: 'elective', time_window: '1y' })
+      ]
+    },
     comprehensive: {
       fail_count_threshold: 2,
       absence_count_threshold: 3
@@ -584,6 +805,20 @@ const hydrateForm = (row: Rule) => {
     form.condition_mode = 'comprehensive'
     form.comprehensive.fail_count_threshold = Number(row.conditions.fail_count_threshold ?? 2)
     form.comprehensive.absence_count_threshold = Number(row.conditions.absence_count_threshold ?? 3)
+    resetStandardByType(row.type)
+  } else if (row.conditions?.mode === 'composite') {
+    form.condition_mode = 'composite'
+    form.composite.logic = row.conditions.logic === 'all' ? 'all' : 'any'
+    form.composite.items = Array.isArray(row.conditions.items) && row.conditions.items.length
+      ? row.conditions.items.map((item: any) => createConditionItem(row.type, {
+          label: item.label || '',
+          metric: item.metric || DEFAULT_STANDARD_BY_TYPE[row.type].metric,
+          operator: item.operator || DEFAULT_STANDARD_BY_TYPE[row.type].operator,
+          threshold: Number(item.threshold ?? DEFAULT_STANDARD_BY_TYPE[row.type].threshold),
+          time_window: item.time_window || '',
+          course_type: item.course_type || ''
+        }))
+      : [createConditionItem(row.type)]
     resetStandardByType(row.type)
   } else {
     form.condition_mode = 'standard'
@@ -722,6 +957,35 @@ onMounted(async () => {
 .scope-text { color: #64748b; }
 .pagination-wrapper { display: flex; justify-content: flex-end; margin-top: 16px; }
 .section-title { margin: 8px 0 14px; font-size: 15px; font-weight: 700; color: #1f2937; }
+.condition-row :deep(.el-form-item) { margin-bottom: 18px; }
+.rule-number-input { width: 100%; min-width: 168px; }
+.rule-number-input :deep(.el-input__wrapper) { justify-content: flex-start; }
+.rule-number-input :deep(.el-input__inner) { text-align: left; }
+.composite-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 18px;
+  margin-bottom: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #f8fafc 0%, #eef6ff 100%);
+}
+.composite-title { font-weight: 700; color: #0f172a; }
+.composite-hint { margin-top: 4px; color: #64748b; font-size: 13px; }
+.condition-list { display: flex; flex-direction: column; gap: 14px; }
+.condition-card {
+  padding: 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.05);
+}
+.condition-card-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+.condition-index { font-weight: 700; color: #2563eb; }
+.condition-preview { margin-left: 10px; color: #64748b; font-size: 13px; }
+.add-condition-btn { width: 100%; margin-top: 12px; border-style: dashed; }
 .conditions-json { margin-top: 16px; }
 .conditions-json h4 { margin-bottom: 8px; color: #1f2937; }
 .conditions-json pre { margin: 0; padding: 16px; border-radius: 14px; background: #0f172a; color: #e2e8f0; overflow: auto; font-size: 12px; line-height: 1.6; }
@@ -730,6 +994,9 @@ onMounted(async () => {
   .header-actions, .toolbar-actions { width: 100%; }
   .header-actions :deep(.el-button), .toolbar-actions :deep(.el-button) { flex: 1; }
   .filters { grid-template-columns: 1fr; }
+  .rule-number-input { min-width: 100%; }
+  .composite-toolbar { align-items: stretch; flex-direction: column; }
+  .condition-card-header { align-items: flex-start; flex-direction: column; }
 }
 </style>
 

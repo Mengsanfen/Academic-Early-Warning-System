@@ -10,6 +10,7 @@ from app.models.base import BaseModel, TimestampMixin
 
 COMPREHENSIVE_RULE_CODE = "COMPREHENSIVE_RISK"
 COMPREHENSIVE_RULE_MODE = "comprehensive"
+COMPOSITE_RULE_MODE = "composite"
 
 
 def _enum_values(enum_cls):

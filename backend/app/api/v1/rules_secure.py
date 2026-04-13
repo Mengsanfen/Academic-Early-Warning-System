@@ -12,6 +12,7 @@ from app.api.deps import get_admin_user
 from app.database import get_db
 from app.models.rule import (
     AlertLevel,
+    COMPOSITE_RULE_MODE,
     COMPREHENSIVE_RULE_CODE,
     COMPREHENSIVE_RULE_MODE,
     Rule,
@@ -216,7 +217,7 @@ RULE_METRICS = [
     {
         "value": "score",
         "label": "单科成绩",
-        "description": "按最近一次单门成绩触发预警",
+        "description": "按学生当前各课程有效成绩中的最低分触发预警",
         "supports_time_window": True,
         "supports_course_type": True,
         "unit": "分",
@@ -527,6 +528,11 @@ def get_rule_templates():
                 "value": COMPREHENSIVE_RULE_MODE,
                 "label": "综合风险",
                 "description": "单学期挂科门数和累计缺勤次数联合判定",
+            },
+            {
+                "value": COMPOSITE_RULE_MODE,
+                "label": "组合条件",
+                "description": "支持按任一或全部条件组合成绩、考勤、学分等多项指标",
             }
         ],
         "target_types": RULE_TARGET_TYPES,
@@ -665,55 +671,77 @@ def toggle_rule(
 
 
 
+VALID_RULE_METRICS = {
+    "score",
+    "avg_score",
+    "fail_count",
+    "gpa",
+    "earned_credit",
+    "failed_credit",
+    "attendance_rate",
+    "absence_count",
+    "late_count",
+}
+VALID_RULE_OPERATORS = {"<", "<=", ">", ">=", "==", "!="}
+
+
 def _validate_conditions(conditions: Dict[str, Any]) -> bool:
     if not isinstance(conditions, dict):
-        raise ValueError("条件必须是字典格式")
+        raise ValueError("?????????")
 
     if conditions.get("mode") == COMPREHENSIVE_RULE_MODE:
         required_fields = ("fail_count_threshold", "absence_count_threshold")
         for field in required_fields:
             if field not in conditions:
-                raise ValueError(f"缺少 '{field}' 字段")
+                raise ValueError(f"?? '{field}' ??")
             try:
                 value = int(conditions[field])
             except (TypeError, ValueError) as exc:
-                raise ValueError(f"{field} 必须是数字: {conditions[field]}") from exc
+                raise ValueError(f"{field} ?????: {conditions[field]}") from exc
             if value < 0:
-                raise ValueError(f"{field} 不能小于 0")
+                raise ValueError(f"{field} ???? 0")
         return True
 
-    if "metric" not in conditions:
-        raise ValueError("缺少 'metric' 字段")
-    if "threshold" not in conditions:
-        raise ValueError("缺少 'threshold' 字段")
+    if conditions.get("mode") == COMPOSITE_RULE_MODE:
+        logic = conditions.get("logic", "any")
+        if logic not in {"any", "all"}:
+            raise ValueError("???? logic ??? any ? all")
 
-    valid_metrics = {
-        "score",
-        "avg_score",
-        "fail_count",
-        "gpa",
-        "earned_credit",
-        "failed_credit",
-        "attendance_rate",
-        "absence_count",
-        "late_count",
-    }
-    if conditions["metric"] not in valid_metrics:
-        raise ValueError(f"不支持的指标类型: {conditions['metric']}，支持: {valid_metrics}")
+        items = conditions.get("items")
+        if not isinstance(items, list) or not items:
+            raise ValueError("?????????? 1 ???")
+        if len(items) > 10:
+            raise ValueError("???????? 10 ???")
+
+        for index, item in enumerate(items, start=1):
+            if not isinstance(item, dict):
+                raise ValueError(f"????? {index} ????????")
+            _validate_standard_condition(item, prefix=f"????? {index} ???")
+        return True
+
+    _validate_standard_condition(conditions)
+    return True
+
+
+def _validate_standard_condition(conditions: Dict[str, Any], prefix: str = "????") -> None:
+    if "metric" not in conditions:
+        raise ValueError(f"{prefix} ?? 'metric' ??")
+    if "threshold" not in conditions:
+        raise ValueError(f"{prefix} ?? 'threshold' ??")
+
+    if conditions["metric"] not in VALID_RULE_METRICS:
+        raise ValueError(f"{prefix} ????????: {conditions['metric']}???: {VALID_RULE_METRICS}")
 
     try:
         float(conditions["threshold"])
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"阈值必须是数字: {conditions['threshold']}") from exc
+        raise ValueError(f"{prefix} ???????: {conditions['threshold']}") from exc
 
-    if "operator" in conditions:
-        valid_operators = {"<", "<=", ">", ">=", "==", "!="}
-        if conditions["operator"] not in valid_operators:
-            raise ValueError(f"不支持的运算符: {conditions['operator']}，支持: {valid_operators}")
+    operator_value = conditions.get("operator", "<")
+    if operator_value not in VALID_RULE_OPERATORS:
+        raise ValueError(f"{prefix} ???????: {operator_value}???: {VALID_RULE_OPERATORS}")
 
-    if "course_type" in conditions and conditions["course_type"] is not None:
+    if conditions.get("course_type") is not None:
         valid_course_types = {item["value"] for item in RULE_COURSE_TYPES}
         if conditions["course_type"] not in valid_course_types:
-            raise ValueError(f"不支持的课程类型: {conditions['course_type']}")
-
-    return True
+            raise ValueError(f"{prefix} ????????: {conditions['course_type']}")

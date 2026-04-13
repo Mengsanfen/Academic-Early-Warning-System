@@ -13,7 +13,12 @@ from app.core.rule_engine.comprehensive_rule import (
     ensure_comprehensive_rule,
     evaluate_comprehensive_rule,
 )
-from app.models.rule import COMPREHENSIVE_RULE_CODE, COMPREHENSIVE_RULE_MODE, TargetType
+from app.models.rule import (
+    COMPOSITE_RULE_MODE,
+    COMPREHENSIVE_RULE_CODE,
+    COMPREHENSIVE_RULE_MODE,
+    TargetType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +167,9 @@ class SimpleRuleEngine:
                         )
                 return result
 
+            if conditions.get("mode") == COMPOSITE_RULE_MODE:
+                return self._execute_composite_rule(rule, students, conditions, stats, result)
+
             metric_type = conditions.get("metric")
             threshold = conditions.get("threshold")
             op_str = conditions.get("operator", "<")
@@ -170,6 +178,11 @@ class SimpleRuleEngine:
 
             if metric_type is None or threshold is None:
                 result["error"] = f"missing_required_fields: metric={metric_type}, threshold={threshold}"
+                return result
+            try:
+                threshold_value = float(threshold)
+            except (TypeError, ValueError):
+                result["error"] = f"invalid_threshold: {threshold}"
                 return result
 
             op_func = self.OPERATORS.get(op_str)
@@ -183,10 +196,10 @@ class SimpleRuleEngine:
                     if metric_value is None:
                         continue
 
-                    if op_func(metric_value, threshold):
+                    if op_func(metric_value, threshold_value):
                         stats["total_triggered"] += 1
                         result["triggered_count"] += 1
-                        message = self._generate_message(rule, student, metric_value, threshold)
+                        message = self._generate_message(rule, student, metric_value, threshold_value)
                         _, created, dedup_resolved = self._upsert_active_alert(rule, student, message)
                         if created:
                             stats["alerts_created"] += 1
@@ -213,6 +226,88 @@ class SimpleRuleEngine:
             stats["errors"].append(error_msg)
 
         return result
+
+    def _execute_composite_rule(
+        self,
+        rule: Any,
+        students: List[Any],
+        conditions: Dict[str, Any],
+        stats: Dict[str, Any],
+        result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        logic = str(conditions.get("logic") or "any").lower()
+        items = conditions.get("items") or []
+        if logic not in {"any", "all"}:
+            result["error"] = f"unsupported_composite_logic: {logic}"
+            return result
+
+        for student in students:
+            try:
+                evaluations = [self._evaluate_condition_item(student.id, item) for item in items]
+                if not evaluations:
+                    continue
+
+                if logic == "all":
+                    triggered = all(item["triggered"] for item in evaluations)
+                else:
+                    triggered = any(item["triggered"] for item in evaluations)
+
+                if triggered:
+                    stats["total_triggered"] += 1
+                    result["triggered_count"] += 1
+                    message = self._generate_composite_message(rule, student, evaluations, logic)
+                    _, created, dedup_resolved = self._upsert_active_alert(rule, student, message)
+                    if created:
+                        stats["alerts_created"] += 1
+                        result["alerts_created"] += 1
+                    if dedup_resolved:
+                        stats["alerts_resolved"] += dedup_resolved
+                        result["alerts_resolved"] += dedup_resolved
+                else:
+                    resolved_count = self._resolve_active_alerts(rule.id, student.id)
+                    if resolved_count:
+                        stats["alerts_resolved"] += resolved_count
+                        result["alerts_resolved"] += resolved_count
+            except Exception as exc:
+                logger.warning(
+                    "Failed to evaluate composite rule %s for student %s: %s",
+                    rule.id,
+                    student.id,
+                    exc,
+                )
+
+        return result
+
+    def _evaluate_condition_item(self, student_id: int, item: Dict[str, Any]) -> Dict[str, Any]:
+        metric_type = item.get("metric")
+        threshold = item.get("threshold")
+        op_str = item.get("operator", "<")
+        time_window = item.get("time_window")
+        course_type = item.get("course_type")
+        op_func = self.OPERATORS.get(op_str)
+
+        metric_value = None
+        triggered = False
+        try:
+            threshold_value = float(threshold) if threshold is not None else None
+        except (TypeError, ValueError):
+            threshold_value = None
+
+        if metric_type is not None and threshold_value is not None and op_func is not None:
+            metric_value = self._calculate_metric(student_id, metric_type, time_window, course_type)
+            if metric_value is not None:
+                triggered = bool(op_func(metric_value, threshold_value))
+
+        return {
+            "label": item.get("label"),
+            "metric": metric_type,
+            "operator": op_str,
+            "threshold": threshold_value if threshold_value is not None else threshold,
+            "time_window": time_window,
+            "course_type": course_type,
+            "metric_value": metric_value,
+            "triggered": triggered,
+        }
 
     def _get_active_alerts(self, rule_id: int, student_id: int) -> List[Any]:
         from app.models.alert import Alert, AlertStatus
@@ -622,6 +717,60 @@ class SimpleRuleEngine:
         except Exception as exc:
             logger.warning("Failed to render alert message: %s", exc)
             return f"学生{student.name}({student.student_no})触发预警：{rule.name}"
+
+    def _generate_composite_message(
+        self,
+        rule: Any,
+        student: Any,
+        evaluations: List[Dict[str, Any]],
+        logic: str,
+    ) -> str:
+        matched = [item for item in evaluations if item["triggered"]]
+        summary_items = matched if matched else evaluations
+        condition_summary = "；".join(self._format_condition_evaluation(item) for item in summary_items)
+        logic_label = "全部条件" if logic == "all" else "任一条件"
+        try:
+            if rule.message_template:
+                return rule.message_template.format(
+                    student_name=student.name,
+                    student_no=student.student_no,
+                    rule_name=rule.name,
+                    condition_summary=condition_summary,
+                    logic_label=logic_label,
+                )
+            return (
+                f"学生{student.name}({student.student_no})触发组合预警：{rule.name}，"
+                f"判定方式：{logic_label}，命中条件：{condition_summary}"
+            )
+        except Exception as exc:
+            logger.warning("Failed to render composite alert message: %s", exc)
+            return f"学生{student.name}({student.student_no})触发组合预警：{rule.name}"
+
+    def _format_condition_evaluation(self, item: Dict[str, Any]) -> str:
+        metric_labels = {
+            "score": "单科成绩",
+            "avg_score": "平均成绩",
+            "fail_count": "不及格课程数",
+            "gpa": "GPA",
+            "earned_credit": "已获学分",
+            "failed_credit": "未获学分",
+            "attendance_rate": "出勤率",
+            "absence_count": "缺勤次数",
+            "late_count": "迟到次数",
+        }
+        course_type_labels = {
+            "required": "必修课",
+            "elective": "选修课",
+            "public": "公共课",
+            "professional": "专业课",
+            "practice": "实践课",
+        }
+        label = item.get("label") or metric_labels.get(item.get("metric"), item.get("metric") or "未命名条件")
+        course_type = item.get("course_type")
+        course_suffix = f"（{course_type_labels.get(course_type, course_type)}）" if course_type else ""
+        metric_value = item.get("metric_value")
+        current_value = "-" if metric_value is None else metric_value
+        return f"{label}{course_suffix} 当前 {current_value} {item.get('operator')} {item.get('threshold')}"
 
 
 
